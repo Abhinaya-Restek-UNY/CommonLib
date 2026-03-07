@@ -21,9 +21,9 @@
       {
         devShells.default = pkgs.mkShell {
           packages = [
-            pkgs.gdb
             pkgs.gcc
-            pkgs.clang
+            pkgs.gdb
+            pkgs.clang-tools
             pkgs.cmake
             pkgs.ninja
           ];
