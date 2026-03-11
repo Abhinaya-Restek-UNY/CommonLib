@@ -154,7 +154,6 @@ inline fsize_t serial_hub_get_next_packet(uint8_t *currentCOB_byte,
 };
 
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
-#define MIN(a, b) (((a) < (b)) ? (a) : (b))
 
 inline fsize_t serial_hub_start_reading(serial_hub_handle_t *handle,
                                         uint8_t *start, uint8_t *end) {
