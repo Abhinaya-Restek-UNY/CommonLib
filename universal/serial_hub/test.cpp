@@ -8,7 +8,7 @@
 #include <string.h>
 #include <vector>
 
-#define TEST_SIZE 12
+#define TEST_SIZE 602
 #include <stdint.h>
 #include <stdio.h>
 
@@ -31,24 +31,36 @@ inline void print_hex_dump(const uint8_t *data, size_t size) {
 std::vector<uint8_t> write_buf;
 
 void local_write(void *ctx, uint8_t *data, fsize_t size) {
+
   serial_hub_handle_t *dst = (serial_hub_handle_t *)ctx;
   fsize_t first = size / 2;
+  printf("test write:\n");
+  print_hex_dump(data, size);
 
   uint8_t *test = new uint8_t[size + first];
-  mempcpy(test, data, size);
-  mempcpy(test + size, data, first);
-
-  // serial_hub_on_read(dst, data, size);
-  // return;
-  printf("Wa\n");
-  print_hex_dump(test, size + first);
-  printf("\n");
-  // serial_hub_on_read(dst, data, size);
+  // data[3] = 1;
+  // mempcpy(test, data, size);
+  // data[3]++;
+  // mempcpy(test + size, data, first);
+  //
+  // serial_hub_on_read(dst, test, size + first);
+  // serial_hub_on_read(dst, data + first, size - first);
+  //
+  // data[3]++;
+  // for (fsize_t i = 0; i < size; i++) {
+  //   serial_hub_on_read(dst, data + i, 1);
+  // }
+  // data[3]++;
+  // //
   for (fsize_t i = 0; i < size; i++) {
     serial_hub_on_read(dst, data + i, 1);
   }
-  // serial_hub_on_read(dst, test, first + size);
+  // data[3]++;
+  // serial_hub_on_read(dst, data, first);
   // serial_hub_on_read(dst, data + first, size - first);
+  // data[3]++;
+  // data[2] = 3;
+  // serial_hub_on_read(dst, data, size);
 };
 
 fsize_t well = 0;
@@ -70,10 +82,11 @@ int main(int argc, char *argv[]) {
   uint8_t dat[TEST_SIZE] = {};
 
   for (fsize_t t = 0; t < TEST_SIZE; t++) {
-    dat[t] = (t % 254) + 1;
-    if (dat[t] % 5 == 0) {
-      dat[t] = 0x0;
-    }
+    dat[t] = (t % 5) + 1;
+    // dat[t] = 0xAA;
+    // if ((t + 1) % 255 == 0) {
+    //   dat[t] = 0x0;
+    // }
   }
 
   printf("\n");

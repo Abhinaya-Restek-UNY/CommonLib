@@ -1,6 +1,11 @@
 #ifndef SERIAL_HUB_H
 #define SERIAL_HUB_H
 
+#define COBS_ENCODE_DST_BUF_LEN_MAX(SRC_LEN)                                   \
+  (((SRC_LEN) == 0u) ? 1u : ((SRC_LEN) + (((SRC_LEN) + 253u) / 254u)))
+
+#define COBS_DECODE_DST_BUF_LEN_MAX(SRC_LEN)                                   \
+  (((SRC_LEN) == 0u) ? 0u : ((SRC_LEN) - 1u))
 #include <stdio.h>
 #ifdef __cplusplus
 extern "C" {
@@ -24,10 +29,11 @@ typedef struct {
 } __attribute__((packed)) serial_hub_raw_packet;
 
 typedef struct {
-  fsize_t expected_length;
   int8_t state;
-  on_receive_cb_t callback;
   void *ctx;
+  on_receive_cb_t callback;
+  fsize_t expected_length;
+  fsize_t max_expected_length;
 } serial_hub_topic_t;
 
 typedef struct {
@@ -43,6 +49,7 @@ typedef struct {
 
   fsize_t __count;
   fsize_t __next_zero;
+  fsize_t __prev_zero;
 
   write_cb_t __write_cb;
 

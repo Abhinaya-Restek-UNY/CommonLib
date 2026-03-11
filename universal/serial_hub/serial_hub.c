@@ -47,7 +47,7 @@ void serial_hub_reserve_memory(serial_hub_handle_t *handle,
     free(handle->__read_buf);
   };
 
-  handle->__read_buf_size = max_message_length + max_message_length / 255 + 2;
+  handle->__read_buf_size = COBS_ENCODE_DST_BUF_LEN_MAX(max_message_length);
   handle->__write_buf_size = handle->__read_buf_size + SERIAL_HUB_PAYLOAD_SIZE;
 
   handle->__write_buf = (uint8_t *)malloc(handle->__write_buf_size);
@@ -59,10 +59,7 @@ int8_t serial_hub_attach_topic(serial_hub_handle_t *handle, uint8_t id,
                                fsize_t size, void *ctx,
                                on_receive_cb_t callback) {
 
-  fsize_t max_len = size + (size / 255) + 2;
-
   if (id >= SERIAL_HUB_TOPIC_MAX) {
-
     return SERIAL_HUB_ERR_OUT_OF_BOUND;
   }
 
@@ -73,6 +70,7 @@ int8_t serial_hub_attach_topic(serial_hub_handle_t *handle, uint8_t id,
   }
 
   topic->state = SERIAL_HUB_STATE_INITIALIZED;
+  topic->max_expected_length = COBS_ENCODE_DST_BUF_LEN_MAX(size);
 
   topic->callback = callback;
   topic->expected_length = size;
@@ -156,42 +154,75 @@ inline fsize_t serial_hub_get_next_packet(uint8_t *currentCOB_byte,
 };
 
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
+#define MIN(a, b) (((a) < (b)) ? (a) : (b))
+
 inline fsize_t serial_hub_start_reading(serial_hub_handle_t *handle,
                                         uint8_t *start, uint8_t *end) {
+  fsize_t in_idx = 0;
+  fsize_t in_len = end - start;
 
-  fsize_t count_start = handle->__count;
+  while (in_idx < in_len &&
+         handle->__count < handle->__current_topic->expected_length) {
 
-  for (uint8_t *byte = start;
-       byte < end &&
-       handle->__count < handle->__current_topic->expected_length;) {
+    // 1. Did we reach the target jump index?
+    if (handle->__count == handle->__next_zero) {
+      // Extract the jump code we just copied into the buffer during the last
+      // memcpy
+      uint8_t next_jump = handle->__read_buf[handle->__count - 1];
 
-    uint8_t len = MIN(end - byte, handle->__next_zero - handle->__count + 1);
+      if (next_jump == 0) { // Catch invalid/corrupted COBS data
+        handle->state = SERIAL_HUB_READ_STATE_EMPTY;
+        return in_idx;
+      }
 
-    if (len < 1) {
-      break;
+      // 2. Check the jump code that BROUGHT us here (stored in __prev_zero)
+      if (handle->__prev_zero == 255) {
+        // It was a 254-byte max run. Drop the overhead byte by walking back the
+        // output counter! We DO NOT walk back in_idx, which natively drops the
+        // byte from the stream.
+        handle->__count--;
+      } else {
+        // Normal run. Restore the original 0x00 zero.
+        handle->__read_buf[handle->__count - 1] = 0x00;
+      }
+
+      // 3. Setup the target for the next jump
+      handle->__prev_zero =
+          next_jump; // Save this jump code for the next evaluation
+      handle->__next_zero =
+          handle->__count + next_jump; // Set absolute output target
+
+      continue; // Re-evaluate the loop limits immediately
     }
 
-    memcpy(handle->__read_buf + handle->__count, byte, len);
+    // 4. Calculate safe block copy limits
+    fsize_t space_to_jump = handle->__next_zero - handle->__count;
+    fsize_t space_in_input = in_len - in_idx;
+    fsize_t space_in_payload =
+        handle->__current_topic->expected_length - handle->__count;
 
-    handle->__read_buf[handle->__next_zero] = 0xFF;
-    if (start + handle->__next_zero - count_start < end) {
-      handle->__next_zero += *(start + handle->__next_zero - count_start);
+    fsize_t len = MIN(space_to_jump, space_in_input);
+    len = MIN(len, space_in_payload);
+
+    if (len > 0) {
+      // Use in_idx for the source offset, and __count for the destination
+      // offset
+      memcpy(handle->__read_buf + handle->__count, start + in_idx, len);
+      handle->__count += len;
+      in_idx += len;
     }
-
-    handle->__count += len;
-    byte += len;
   }
 
-  fsize_t total_processed = handle->__count - count_start;
-
+  // 5. Fire callback if payload is fully assembled
   if (handle->__count == handle->__current_topic->expected_length) {
     handle->__current_topic->callback(handle->__current_topic->ctx,
-                                      handle->__read_buf, handle->__count);
-    handle->__count = 0;
-    handle->__current_topic = NULL;
-    handle->__next_zero = 0;
+                                      handle->__read_buf,
+                                      handle->__current_topic->expected_length);
+    handle->state = SERIAL_HUB_READ_STATE_EMPTY;
   }
-  return total_processed;
+
+  // Return exactly how many bytes we consumed from this chunk
+  return in_idx;
 };
 
 void serial_hub_on_read(serial_hub_handle_t *handle, uint8_t *data,
@@ -202,7 +233,6 @@ void serial_hub_on_read(serial_hub_handle_t *handle, uint8_t *data,
   for (uint8_t *byte = data; byte < end_of_data; byte++) {
 
     if (*byte == 0) {
-      handle->__count = 0;
       handle->state = SERIAL_HUB_READ_STATE_HIT_ZERO;
       continue;
     }
@@ -211,19 +241,24 @@ void serial_hub_on_read(serial_hub_handle_t *handle, uint8_t *data,
     case SERIAL_HUB_READ_STATE_HIT_ZERO:
       if (*byte < SERIAL_HUB_TOPIC_MAX &&
           handle->topics[*byte].state == SERIAL_HUB_STATE_INITIALIZED) {
-
         handle->__current_topic = &handle->topics[*byte];
         handle->state = SERIAL_HUB_READ_STATE_HIT_ID;
       } else {
         handle->state = SERIAL_HUB_READ_STATE_EMPTY;
-        byte += serial_hub_get_next_packet(byte, end_of_data);
       }
       break;
     case SERIAL_HUB_READ_STATE_HIT_ID:
-
       handle->__next_zero = *byte;
-      handle->state = SERIAL_HUB_READ_STATE_HIT_READING;
 
+      // Prevent 0-byte jump infinite loops
+      if (handle->__next_zero > 0 &&
+          handle->__next_zero < handle->__current_topic->max_expected_length) {
+        handle->__prev_zero = *byte; // Store the actual jump code here!
+        handle->state = SERIAL_HUB_READ_STATE_HIT_READING;
+        handle->__count = 0;
+      } else {
+        handle->state = SERIAL_HUB_READ_STATE_EMPTY;
+      }
       break;
     case SERIAL_HUB_READ_STATE_HIT_READING:
       byte += serial_hub_start_reading(handle, byte, end_of_data) - 1;
