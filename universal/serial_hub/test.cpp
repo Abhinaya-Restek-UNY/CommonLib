@@ -8,7 +8,7 @@
 #include <string.h>
 #include <vector>
 
-#define TEST_SIZE 24
+#define TEST_SIZE 12
 #include <stdint.h>
 #include <stdio.h>
 
@@ -32,10 +32,23 @@ std::vector<uint8_t> write_buf;
 
 void local_write(void *ctx, uint8_t *data, fsize_t size) {
   serial_hub_handle_t *dst = (serial_hub_handle_t *)ctx;
-  print_hex_dump(data, size);
-  fsize_t first = size / 4;
-  fsize_t middle = first * 3;
-  serial_hub_on_read(dst, data, size);
+  fsize_t first = size / 2;
+
+  uint8_t *test = new uint8_t[size + first];
+  mempcpy(test, data, size);
+  mempcpy(test + size, data, first);
+
+  // serial_hub_on_read(dst, data, size);
+  // return;
+  printf("Wa\n");
+  print_hex_dump(test, size + first);
+  printf("\n");
+  // serial_hub_on_read(dst, data, size);
+  for (fsize_t i = 0; i < size; i++) {
+    serial_hub_on_read(dst, data + i, 1);
+  }
+  // serial_hub_on_read(dst, test, first + size);
+  // serial_hub_on_read(dst, data + first, size - first);
 };
 
 fsize_t well = 0;
@@ -54,9 +67,9 @@ int main(int argc, char *argv[]) {
   serial_hub_reserve_memory(&handle1, TEST_SIZE);
   serial_hub_reserve_memory(&handle2, TEST_SIZE);
 
-  uint8_t dat[TEST_SIZE + 3] = {};
+  uint8_t dat[TEST_SIZE] = {};
 
-  for (fsize_t t = 0; t < TEST_SIZE + 3; t++) {
+  for (fsize_t t = 0; t < TEST_SIZE; t++) {
     dat[t] = (t % 254) + 1;
     if (dat[t] % 5 == 0) {
       dat[t] = 0x0;
@@ -73,7 +86,7 @@ int main(int argc, char *argv[]) {
 
   serial_hub_attach_topic(&handle2, 1, sizeof(dat), NULL, local_on_read);
 
-  serial_hub_write_topic(&handle1, 1, (uint8_t *)&dat, TEST_SIZE + 3);
+  serial_hub_write_topic(&handle1, 1, (uint8_t *)&dat, TEST_SIZE);
 
   return 0;
 }

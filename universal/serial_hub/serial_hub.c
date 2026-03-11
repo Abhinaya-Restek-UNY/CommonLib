@@ -167,7 +167,7 @@ inline fsize_t serial_hub_start_reading(serial_hub_handle_t *handle,
 
     uint8_t len = MIN(end - byte, handle->__next_zero - handle->__count + 1);
 
-    if (len < 0) {
+    if (len < 1) {
       break;
     }
 
@@ -182,11 +182,16 @@ inline fsize_t serial_hub_start_reading(serial_hub_handle_t *handle,
     byte += len;
   }
 
+  fsize_t total_processed = handle->__count - count_start;
+
   if (handle->__count == handle->__current_topic->expected_length) {
     handle->__current_topic->callback(handle->__current_topic->ctx,
                                       handle->__read_buf, handle->__count);
+    handle->__count = 0;
+    handle->__current_topic = NULL;
+    handle->__next_zero = 0;
   }
-  return end - start;
+  return total_processed;
 };
 
 void serial_hub_on_read(serial_hub_handle_t *handle, uint8_t *data,
@@ -216,12 +221,12 @@ void serial_hub_on_read(serial_hub_handle_t *handle, uint8_t *data,
       break;
     case SERIAL_HUB_READ_STATE_HIT_ID:
 
-      handle->__next_zero = *byte - 1;
+      handle->__next_zero = *byte;
       handle->state = SERIAL_HUB_READ_STATE_HIT_READING;
 
       break;
     case SERIAL_HUB_READ_STATE_HIT_READING:
-      byte += serial_hub_start_reading(handle, byte, end_of_data);
+      byte += serial_hub_start_reading(handle, byte, end_of_data) - 1;
       break;
     case SERIAL_HUB_READ_STATE_EMPTY:
       break;
