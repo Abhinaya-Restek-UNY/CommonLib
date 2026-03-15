@@ -214,6 +214,9 @@ inline fsize_t serial_hub_start_reading(serial_hub_handle_t *handle,
 
   // 5. Fire callback if payload is fully assembled
   if (handle->__count == handle->__current_topic->expected_length) {
+    if (handle->__count == handle->__next_zero && handle->__prev_zero != 255) {
+      handle->__read_buf[handle->__count - 1] = 0x00;
+    }
     handle->__current_topic->callback(handle->__current_topic->ctx,
                                       handle->__read_buf,
                                       handle->__current_topic->expected_length);
